@@ -44,17 +44,17 @@ tensorboard==2.9.0
 tensorboard-data-server==0.6.1
 tensorboard-plugin-wit==1.8.1
 threadpoolctl==3.1.0
---extra-index-url https://download.pytorch.org/whl/cpu
-torch==1.11.0+cpu
--f https://data.pyg.org/whl/torch-1.11.0+cpu.html
+--extra-index-url https://download.pytorch.org/whl/cu102
+torch==1.11.0+cu102
+-f https://data.pyg.org/whl/torch-1.11.0+cu102.html
 torch-cluster==1.6.0
--f https://data.pyg.org/whl/torch-1.11.0+cpu.html
+-f https://data.pyg.org/whl/torch-1.11.0+cu102.html
 torch-geometric==2.0.4
--f https://data.pyg.org/whl/torch-1.11.0+cpu.html
+-f https://data.pyg.org/whl/torch-1.11.0+cu102.html
 torch-scatter==2.0.9
--f https://data.pyg.org/whl/torch-1.11.0+cpu.html
+-f https://data.pyg.org/whl/torch-1.11.0+cu102.html
 torch-sparse==0.6.13
--f https://data.pyg.org/whl/torch-1.11.0+cpu.html
+-f https://data.pyg.org/whl/torch-1.11.0+cu102.html
 torch-spline-conv==1.2.1
 tqdm==4.64.0
 typing_extensions==4.2.0
