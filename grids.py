@@ -704,13 +704,39 @@ class Grid_PWA():
             self.A[n,n] = 1.0
         
     
+    def global_Lap_eig(self):
+        
+        sz = self.aggop[0].shape[0]
+        
+        D = sp.diags((np.array(self.networkx.degree)[:,1]/2)**(-0.5))
+        L = sp.eye(sz) - D @ self.A @ D
+        
+        masks = self.gmask
+        num_eigs = 20
+        evals, evecs = sp.linalg.eigsh(L, k=num_eigs)
+        
+        x = torch.zeros(sz, 2*num_eigs+1).float()
+        x[self.boarder_hops, 0] = 1.0
+        x[:, [i for i in range(1,num_eigs+1)]]  = torch.tensor(evals).float()
+        x[:, [i for i in range(num_eigs+1,2*num_eigs+1)]] = torch.tensor(evecs).float()
+        
+        edge_index, e_w0 = from_scipy_sparse_matrix(self.A)
+        e_w1 = torch.tensor([masks[edge_index[0, i], edge_index[1, i]] for i in range(edge_index[0].shape[0])])
+        
+        edge_attr = torch.cat((e_w0.unsqueeze(1), e_w1.unsqueeze(1)), dim = 1)
+        
+        data = Data(x = x, edge_index = edge_index, edge_attr = edge_attr.float())
+        
+        self.gdata = data
+        
+        
     def data(self):
         
         sz = self.aggop[0].shape[0]
         masks = self.gmask
-        boarder_nodes = self.boarder_hops
+
         x = torch.zeros(sz)
-        x[boarder_nodes] = 1.0
+        x[self.boarder_hops] = 1.0
         edge_index, e_w0 = from_scipy_sparse_matrix(self.A)
         e_w1 = torch.tensor([masks[edge_index[0, i], edge_index[1, i]] for i in range(edge_index[0].shape[0])])
         
@@ -822,3 +848,8 @@ class Grid_PWA():
             self.apply_bc(1e-16)
 
         return 
+    
+    
+    
+    
+    

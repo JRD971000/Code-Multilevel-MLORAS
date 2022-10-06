@@ -1,4 +1,4 @@
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from pathlib import Path
@@ -17,12 +17,18 @@ import scipy
 from grids import *
 
 import time
-mpl.rcParams['figure.dpi'] = 300
+# mpl.rcParams['figure.dpi'] = 300
 from ST_CYR import *
 import numpy as np
 import scipy as sp
 from pyamg import amg_core
+import numml.sparse as spml
 
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+    
 def match_sparsiy(output, grid):
     
     sz = grid.gdata.x.shape[0]
@@ -43,13 +49,13 @@ def get_Li (masked, grid):
         learnables = grid.learn_nodes[i]
 
         
-        L_i[i] = torch.zeros(len(nz),len(nz)).double()
+        L_i[i] = torch.zeros(len(nz),len(nz)).double().to(device)
 
         list_idx = []
 
         for l in learnables:
             list_idx.append(nz.index(l))
-            
+        
         L_i[i][np.ix_(list_idx, list_idx)] = L[np.ix_(learnables, learnables)]
         
 
@@ -107,15 +113,19 @@ def make_sparse_torch(A, sparse = True):
                              [i% A.shape[1] for i in range(A.shape[0]*A.shape[1])]])
         dat = A.flatten()
     s = torch.sparse_coo_tensor(idxs, dat, (A.shape[0], A.shape[1]))
-    return s.to_sparse_csr()
+    return s#.to_sparse_csr()
 
     
 def preconditioner(grid, output, train = False, precond_type = False, u = None):
     
+    if precond_type == 'ML_ORAS':
+        t0 = time.time()
+    
+    output, out_R0 = output
     
     M = 0
-    tsA = make_sparse_torch(grid.A) 
-    
+    # tsA = torch.tensor(grid.A.toarray()).to(device)
+    tsA = spml.SparseCSRTensor(make_sparse_torch(grid.A))
     # print (tq5-tq4)
     if precond_type == 'AS':  
         for i in range(grid.aggop[0].shape[-1]):
@@ -175,8 +185,8 @@ def preconditioner(grid, output, train = False, precond_type = False, u = None):
     
     elif precond_type == 'ML_ORAS':
         
-
         # masked = match_sparsiy(output, grid)
+        # t0 = time.time()
         masked = output
         L = get_Li (masked, grid)
 
@@ -192,11 +202,12 @@ def preconditioner(grid, output, train = False, precond_type = False, u = None):
             modified_R_i = grid.modified_R[i]
             
 
-            modified_L = L[i]
-            AA = make_sparse_torch(grid.R_hop[i]) @ tsA @ make_sparse_torch(grid.R_hop[i]).t()
+            modified_L = L[i].to(device)
+            grid_Rhop_i = spml.SparseCSRTensor(make_sparse_torch(grid.R_hop[i])).to(device)
+            AA =  grid_Rhop_i @ tsA @ grid_Rhop_i.T  ####SPSPMM
 
             # AA = torch.tensor(grid.R_hop[i].toarray()) @ torch.tensor(grid.A.toarray()) @ torch.tensor(grid.R_hop[i].transpose().toarray())
-            A_tilde_inv = torch.linalg.inv(AA.to_dense() + (1/(grid.h**2))*modified_L)
+            A_tilde_inv = torch.linalg.pinv(AA.to_dense() + (1/(grid.h**2))*modified_L)
             # add_M = make_sparse_torch(scipy.sparse.csr_matrix(modified_R_i)).t() @ make_sparse_torch(A_tilde_inv, False) @ make_sparse_torch(grid.R_hop[i])
             # M += add_M.to_dense()
             
@@ -218,7 +229,7 @@ def preconditioner(grid, output, train = False, precond_type = False, u = None):
 
             list_ixs.sort()
             
-            add_M = torch.sparse_coo_tensor(torch.tensor([row_idx, col_idx]), A_tilde_inv[list_ixs, :].flatten(), (grid.A.shape[0], grid.A.shape[1]))
+            add_M = torch.sparse_coo_tensor(torch.tensor([row_idx, col_idx]).to(device), A_tilde_inv[list_ixs, :].flatten(), (grid.A.shape[0], grid.A.shape[1])).to(device)
             # add_M = torch.zeros(grid.A.shape).double()
             # add_M[np.ix_(rows, cols)] = A_tilde_inv[list_ixs, :]
             #torch.tensor(modified_R_i.transpose()) @ A_tilde_inv @ torch.tensor(grid.R_hop[i].toarray())
@@ -226,29 +237,48 @@ def preconditioner(grid, output, train = False, precond_type = False, u = None):
                 M = add_M
             else:
                 M += add_M
-
-
+            
+        
     else:
         raise RuntimeError('Wrong type for preconditioner: '+str(precond_type))
+    
+    if precond_type == 'ML_ORAS':
+        t1 = time.time()
         
     # return M.to_dense(), M.to_dense()
-
+    # t1 = time.time()
     if train:
-        # R0 = grid.R0#(grid.aggop[0]*1.0).transpose()
-        R0 = (grid.aggop[0]*1.0).transpose()
-
-        A0 = R0 @ grid.A @ R0.transpose()
-        A0_inv = scipy.sparse.linalg.inv(A0)
-        mul = R0.transpose() @ A0_inv @ R0
-        CGC = make_sparse_torch(mul)
-        eye = torch.sparse_coo_tensor(torch.tensor([[jj for jj in range(tsA.shape[0])], [jj for jj in range(tsA.shape[0])]]), 
-                                      torch.tensor([1 for jj in range(tsA.shape[0])]), (tsA.shape[0], tsA.shape[1])).double().to_sparse_csr()
+        M = spml.SparseCSRTensor(M)
         
-        M_2l = (eye + (- CGC @ tsA)).to_dense() @ (eye.to_dense() + (- M.to_dense() @ tsA.to_dense()))
+        if precond_type == 'ML_ORAS' and out_R0!=None:
+            # R0 = out_R0.to_dense().to(device)
+            R0 = spml.SparseCSRTensor(out_R0)
+        else:
+            R0 = torch.tensor(grid.R0.toarray()).to(device)#(grid.aggop[0]*1.0).transpose()
+        # R0 = torch.tensor((grid.aggop[0]*1.0).transpose().toarray()).to(device)
+
+        # A0 = R0 @ torch.tensor(grid.A.toarray()).to(device) @ R0.t()
+        A0 = R0 @ tsA @ R0.T
+        A0_inv = torch.linalg.pinv(A0.to_dense())
+        CGC = R0.T @ spml.SparseCSRTensor(A0_inv) @ R0
+        # CGC = make_sparse_torch(mul)
+        # eye = torch.sparse_coo_tensor(torch.tensor([[jj for jj in range(tsA.shape[0])], [jj for jj in range(tsA.shape[0])]]), 
+        #                               torch.tensor([1 for jj in range(tsA.shape[0])]), (tsA.shape[0], tsA.shape[1])).double().to_sparse_csr().to(device)
+        # eye = torch.eye(tsA.shape[0]).to(device)
+        eye = spml.eye(tsA.shape[0]).to(device)
+        right_term = eye + (- M @ tsA)
+        left_term  = eye + (- CGC @ tsA)
+        M_2l = left_term @ right_term
     else:
         
+        if precond_type == 'ML_ORAS' and out_R0!=None:
+            R0 = out_R0.to_dense().numpy()
+            R0 = sp.sparse.csr_matrix(R0)
+        else:
+            R0 = grid.R0
+            
         # R0 = grid.R0#(grid.aggop[0]*1.0).transpose()
-        R0 = (grid.aggop[0]*1.0).transpose()
+        # R0 = (grid.aggop[0]*1.0).transpose()
         A0 = R0 @ grid.A @ R0.transpose()
         A0_inv = scipy.sparse.linalg.inv(A0).tocsr()
         CGC = R0.transpose() @ A0_inv @ R0
@@ -256,7 +286,14 @@ def preconditioner(grid, output, train = False, precond_type = False, u = None):
         M_2l = scipy.sparse.csr_matrix(M.detach().to_dense().numpy())
         M_2l = (eye - CGC @ grid.A) @ (eye - M_2l @ grid.A)
         M_2l = torch.tensor(M_2l.toarray())
-        
+    # t2 = time.time()
+    # print(f't10 = {t1-t0}\n')
+    # print(f't21 = {t2-t1}\n')
+    # sys.exit()
+    if precond_type == 'ML_ORAS':
+        t2 = time.time()
+        print(f't10 = {t1-t0}\n')
+        print(f't21 = {t2-t1}\n')
     return M_2l, M
 
     
@@ -272,7 +309,7 @@ def R0_PoU(grid):
     return R0/R0.sum(0)
         
         
-def stationary(grid, out, u = None, K = None, precond_type = 'ORAS'):
+def stationary(grid, out, u = None, K = None, precond_type = 'ML_ORAS'):
 
     M, _ = preconditioner(grid, out, train = True, precond_type = precond_type, u = u)
     
@@ -291,23 +328,74 @@ def stationary(grid, out, u = None, K = None, precond_type = 'ORAS'):
     return L_max
         
     
-def stationary_max(grid, out, u = None, K = None, precond_type = 'ORAS'):
-
+def stationary_max(grid, out, u = None, K = None, precond_type = 'ML_ORAS'):
+    # t0 = time.time()
     eprop, _ = preconditioner(grid, out, train = True, precond_type = precond_type, u = u)
-    
+    # t1 = time.time()
     # return torch.norm(eprop)
     
     list_l2 = []
     out_lmax = copy.deepcopy(u)
+    list_max = torch.zeros(K).to(device)
+    # list_max_2 = torch.zeros(K)
     for k in range(K):
         out_lmax = eprop @ out_lmax
         l2 = torch.norm(out_lmax, p='fro', dim = 0)
-        list_l2.append(l2)
-    
-    conv_fact = list_l2[-1]#(list_l2[-1]/list_l2[-3])**0.5
-    L_max = max(conv_fact)#torch.dot(softmax(conv_fact), conv_fact)
 
+        # list_max_2[k] = max(l2)
+        list_max[k] = max(l2) ** (1/(k+1))
+        list_l2.append(l2)
+    # t2 = time.time()
+    
+
+    conv_fact = list_l2[-1]#(list_l2[-1]/list_l2[-3])**0.5
+    # L_max = max(conv_fact)#torch.dot(softmax(conv_fact), conv_fact)
+    L_max = (torch.softmax(list_max[2:], dim = 0) * list_max[2:]).sum()#max(list_max)
+    # L_max = (list_max_2[-1]/list_max_2[-5]) ** 0.25
+    # print(f'The Normalized List = {np.round(np.array(list_max.detach()),2)} \n')
+    # print(f'The actual List = {np.round(np.array(list_max_2.detach()),2)} \n')
+
+    # print('****************')
     return L_max
+
+
+    # out_ras_I, out_ras_R = out
+    # out_ras_I = torch.zeros_like(out_ras_I)
+    # out_ras_R = None
+    # out_RAS = out_ras_I, out_ras_R
+
+    
+
+    # eprop_RAS, _ = preconditioner(grid, out_RAS, train = True, precond_type = 'ML_ORAS', u = u)
+    
+    # # return torch.norm(eprop)
+    
+    # list_l2_RAS = []
+    # out_lmax_RAS = copy.deepcopy(u)
+    # for k in range(K):
+    #     out_lmax_RAS = eprop_RAS @ out_lmax_RAS
+    #     l2_RAS = torch.norm(out_lmax_RAS, p='fro', dim = 0)
+    #     list_l2_RAS.append(l2_RAS)
+    
+    # # L_max_list = torch.zeros(K)
+
+    # # for k in range(K):
+    # #     L_max_list[k] = (max(list_l2[k])/max(list_l2_RAS[k])) ** 1/(k+1)
+
+    # # sftmx = torch.softmax(L_max_list, dim = 0)
+    # # L_max = (L_max_list * sftmx).sum()
+    
+    
+    # conv_fact_RAS = list_l2_RAS[-1]#(list_l2[-1]/list_l2[-3])**0.5
+    # L_max_RAS = max(conv_fact_RAS)#torch.dot(softmax(conv_fact), conv_fact)
+    
+    # L_max = L_max/L_max_RAS
+    
+    
+    
+    # return L_max
+
+
         
 def test_stationary(grid, out, precond_type, u, K, M=None):
 

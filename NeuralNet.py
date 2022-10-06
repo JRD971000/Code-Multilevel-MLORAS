@@ -14,6 +14,12 @@ from torch.nn.functional import relu, sigmoid
 import numpy as np
 import sys
 
+    
+if torch.cuda.is_available():
+    device = torch.device('cuda')
+else:
+    device = torch.device('cpu')
+    
 def init_weights(m):
     if isinstance(m, nn.Linear):
         torch.nn.init.uniform_(m.weight)
@@ -53,7 +59,7 @@ class FC_test(T.nn.Module):
         self.device = T.device('cpu')
         self.to(self.device)
         
-    def forward(self, D):
+    def forward(self, D, grid):
         
         x, edge_index, edge_attr = D.x, D.edge_index, D.edge_attr
         x = x.flatten()
@@ -62,7 +68,15 @@ class FC_test(T.nn.Module):
         x = relu(self.FC3(x))
         x = self.FC4(x)
         
-        return x
+        row = np.array(grid.mask_edges)[:,0].tolist()
+        col = np.array(grid.mask_edges)[:,1].tolist()
+        
+        sz = grid.gdata.x.shape[0]
+        out = torch.sparse_coo_tensor([row, col], x.flatten(),(sz, sz)).to_dense().double()
+        
+        
+        return out, None
+    
  
     
 class mloras_net(T.nn.Module):
@@ -102,7 +116,7 @@ class mloras_net(T.nn.Module):
                 param_block.append(*conv_block)
                 conv_blocks.append(torch_geometric.nn.Sequential('x, edge_index, edge_attr', conv_block))
                 
-                feature_block = FeatureResNet(dim, [dim for k in range(num_res+1)], dim)
+                feature_block = FeatureResNet(dim, [dim for k in range(num_res+1)], dim).to(device)
                 feature_blocks.append(feature_block)
                 param_block.append(feature_block.network)
                 

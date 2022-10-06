@@ -108,6 +108,8 @@ def fgmres_2L(A, b, x0=None, tol=1e-5,
        http://www-users.cs.umn.edu/~saad/books.html
 
     """
+    M, out_R = M
+    
     # Convert inputs to linear system, with error checking
     A, M, x, b, postprocess = make_system(A, M, x0, b)
     n = A.shape[0]
@@ -194,8 +196,12 @@ def fgmres_2L(A, b, x0=None, tol=1e-5,
         # This is the RHS vector for the problem in the Krylov Space
         g = np.zeros((n,), dtype=x.dtype)
         g[0] = -beta
-        # R0 = grid.R0#grid.aggop[0].transpose()
-        R0 = grid.aggop[0].transpose()
+        if out_R == None:
+            R0 = grid.R0#grid.aggop[0].transpose()
+        else:
+            R0 = out_R.to_dense().numpy()
+            R0 = sp.sparse.csr_matrix(R0)
+        # R0 = grid.aggop[0].transpose()
         A0 = (R0 @ grid.A @ R0.transpose()).toarray()
         A0_inv = np.linalg.inv(A0)
         CGC = R0.transpose().toarray() @ A0_inv @ R0.toarray()

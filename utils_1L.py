@@ -27,8 +27,7 @@ import sys
 import torch as T
 import copy
 import random
-from NeuralNet import *
-from torch.utils.tensorboard import SummaryWriter
+#from torch.utils.tensorboard import SummaryWriter
 import scipy
 from grids import *
 import time
@@ -158,6 +157,24 @@ def stationary_max(grid, output, u = None, K = None, precond_type = 'ORAS', res 
     
     conv_fact = list_l2[-1]#(list_l2[-1]/list_l2[-3])**0.5
     L_max = max(conv_fact)#torch.dot(softmax(conv_fact), conv_fact)
+    
+    
+    M_RAS = preconditioner(grid, output, train = True, precond_type = 'RAS', u = u)
+
+    eprop_RAS = torch.eye(M_RAS.shape[0]) - M_RAS @ torch.tensor(grid.A.toarray())
+    # return torch.norm(eprop)
+    
+    list_l2_RAS = []
+    out_lmax_RAS = copy.deepcopy(u)
+    for k in range(K):
+        out_lmax_RAS = eprop_RAS @ out_lmax_RAS
+        l2_RAS = torch.norm(out_lmax_RAS, p='fro', dim = 0)
+        list_l2_RAS.append(l2_RAS)
+    
+    conv_fact_RAS = list_l2_RAS[-1]#(list_l2[-1]/list_l2[-3])**0.5
+    L_max_RAS = max(conv_fact_RAS)#torch.dot(softmax(conv_fact), conv_fact)
+    
+    L_max = L_max/L_max_RAS
 
     return L_max
         

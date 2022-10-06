@@ -1,7 +1,7 @@
 import numpy as np
 import sys
-sys.path.append('utils')
-import matplotlib.pyplot as plt
+# sys.path.append('utils')
+# import matplotlib.pyplot as plt
 import scipy
 import fem
 import pygmsh
@@ -17,15 +17,15 @@ from pyamg.gallery import stencil_grid
 from pyamg.gallery import poisson
 from torch_geometric.data import Data
 from pyamg.aggregation import lloyd_aggregation
-import matplotlib as mpl
+# import matplotlib as mpl
 from scipy.sparse import csr_matrix, coo_matrix, isspmatrix_csr, isspmatrix_csc
 from pyamg.graph import lloyd_cluster
-from matplotlib.pyplot import figure, text
+# from matplotlib.pyplot import figure, text
 import torch_geometric.data
 
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 
-mpl.rcParams['figure.dpi'] = 300
+# mpl.rcParams['figure.dpi'] = 300
 
 
 class MyMesh:
