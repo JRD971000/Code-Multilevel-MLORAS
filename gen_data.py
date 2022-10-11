@@ -121,4 +121,14 @@ def generate_data(data_args, show_fig = False):
             
     torch.save(data_args, path+"/data_config.pth")
             
-generate_data(data_args, show_fig = False)
+# generate_data(data_args, show_fig = False)
+
+
+for i in range(17):
+    print(i)
+    g = torch.load('Data/test_grids/grid'+str(i)+'.pth')
+    grid = Grid_PWA(g.A, g.mesh, 0.2, hops = 1, 
+                      cut=1, h = 1, nu = 0, BC = 'Dirichlet')    
+    ratio = max(25*((g.A.shape[0]/600)**0.5)/g.A.shape[0], 2/g.A.shape[0])
+    grid.aggop_gen(ratio, 1)
+    torch.save(grid, 'Data/test_grids_2/grid'+str(i)+'.pth')

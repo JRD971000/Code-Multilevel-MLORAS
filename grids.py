@@ -754,18 +754,18 @@ class Grid_PWA():
         else:
             
             self.aggop = node_agg
-            
+        
         num_aggs = self.aggop[0].shape[1]
         list_aggs = {}
         list_cut_aggs = {}
         for i in range(num_aggs):
             list_aggs[i] = []
             list_cut_aggs[i] = set([])
-        
+
         for i, n in enumerate(self.aggop[-1]):
             list_aggs[n].append(i)
             list_cut_aggs[n] = list_cut_aggs[n].union(self.dict_nodes_neighbors_cut[i])
-        
+
         for i in range(num_aggs):
             list_cut_aggs[i] = list(list_cut_aggs[i])
 
@@ -774,13 +774,14 @@ class Grid_PWA():
         for i in range(num_aggs):
             learn_nodes[i] = list(set(list_cut_aggs[i]) - set(list_aggs[i]))
             boarder_hops.extend(learn_nodes[i])
-            
-        list_learn_edges = {}
 
-        for i in range(num_aggs):
-            list_learn_edges[i] = list(self.networkx.subgraph(learn_nodes[i]).edges())
+        # list_learn_edges = {}
+
+        # for i in range(num_aggs):
+        #     list_learn_edges[i] = list(self.networkx.subgraph(learn_nodes[i]).edges())
 
         mask_edges = []
+        
         
         if self.hops != -1:
             for i in range(num_aggs):
@@ -801,22 +802,28 @@ class Grid_PWA():
         
         mask_mat = scipy.sparse.csr_matrix((np.ones(len(mask_edges)), (np.array(mask_edges)[:,0].tolist(), np.array(mask_edges)[:,1].tolist())), shape=(sz, sz))
 
-           
-        all_eye = np.eye(sz)
 
+        # all_eye = np.eye(sz)
+                
         R = {}
         R_hop = {}
         modified_R = {}
         
         for i in range(num_aggs):
-            R[i] = scipy.sparse.csr_matrix(all_eye[list_aggs[i], :])
-            R_hop[i] = scipy.sparse.csr_matrix(all_eye[list_cut_aggs[i], :])
+            # R[i] = scipy.sparse.csr_matrix(all_eye[list_aggs[i], :])
+            R_nodes = len(list_aggs[i])
+            R[i] = scipy.sparse.csr_matrix((np.ones(R_nodes), (np.arange(R_nodes).tolist(), list_aggs[i])), shape=(R_nodes, sz))
             
+            # R_hop[i] = scipy.sparse.csr_matrix(all_eye[list_cut_aggs[i], :])
+            R_hop_nodes = len(list_cut_aggs[i])
+            R_hop[i] = scipy.sparse.csr_matrix((np.ones(R_hop_nodes), (np.arange(R_hop_nodes).tolist(), list_cut_aggs[i])), shape=(R_hop_nodes, sz))
+
             list_ixs = []
             for e in list_aggs[i]:
                 list_ixs.append(list_cut_aggs[i].index(e))
         
-            modified_R[i] = scipy.sparse.csr_matrix((np.ones(len(list_aggs[i])), (list_ixs, np.array(list_cut_aggs[i])[list_ixs])), shape=(len(list_cut_aggs[i]), sz))
+            modified_R[i] = scipy.sparse.csr_matrix((np.ones(R_nodes), (list_ixs, np.array(list_cut_aggs[i])[list_ixs])), shape=(R_hop_nodes, sz))
+        
         
         l0 = []
         l1 = []
@@ -830,11 +837,27 @@ class Grid_PWA():
         R0 = scipy.sparse.diags(1/R0.sum(axis=1).A.ravel()) @ R0
         R0 = R0.transpose()
         
+        
+        
+        A_c = self.aggop[0].transpose() @ self.A @ self.aggop[0]
+        l0 = []
+        l1 = []
+        for i in range(num_aggs):
+
+            non_zeros = R_hop[i].nonzero()[-1].tolist()
+            for neigh in A_c[i].nonzero()[-1].tolist():
+                l0.extend(non_zeros)
+                l1.extend([neigh for j in range(len(non_zeros))]) 
+
+        neigh_R0 = scipy.sparse.csr_matrix((np.ones(len(l0)), (l0, l1)), shape=(sz, num_aggs))
+        neigh_R0 = scipy.sparse.diags(1/neigh_R0.sum(axis=1).A.ravel()) @ neigh_R0
+        neigh_R0 = neigh_R0.transpose()
+        
             
         self.list_aggs = list_aggs
         self.list_cut_aggs = list_cut_aggs
         self.learn_nodes = learn_nodes
-        self.list_learn_edges = list_learn_edges
+        # self.list_learn_edges = list_learn_edges
         self.mask_edges = mask_edges
         self.gmask = mask_mat
         self.boarder_hops = boarder_hops
@@ -842,10 +865,12 @@ class Grid_PWA():
         self.R_hop = R_hop
         self.modified_R = modified_R
         self.R0 = R0
+        self.neigh_R0 = neigh_R0
         self.gdata = self.data()
 
         if self.BC == 'Dirichlet':
             self.apply_bc(1e-16)
+
 
         return 
     

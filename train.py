@@ -24,7 +24,7 @@ from grids import *
 import time
 # mpl.rcParams['figure.dpi'] = 300
 from ST_CYR import *
-import numml.sparse as spml
+# import numml.sparse as spml
 import argparse
 
 from torch_geometric.loader import DataLoader
@@ -48,10 +48,10 @@ print(device)
 print('********')
 train_parser = argparse.ArgumentParser(description='Settings for training machine learning for ORAS')
 
-train_parser.add_argument('--num-epoch', type=int, default=100, help='Number of training epochs')
-train_parser.add_argument('--mini-batch-size', type=int, default=5, help='Coarsening ratio for aggregation')
+train_parser.add_argument('--num-epoch', type=int, default=200, help='Number of training epochs')
+train_parser.add_argument('--mini-batch-size', type=int, default=10, help='Coarsening ratio for aggregation')
 train_parser.add_argument('--lr', type=float, default= 1e-4, help='Learning rate')
-train_parser.add_argument('--TAGConv-k', type=int, default=6, help='TAGConv # of hops')
+train_parser.add_argument('--TAGConv-k', type=int, default=2, help='TAGConv # of hops')
 train_parser.add_argument('--dim', type=int, default=128, help='Dimension of TAGConv filter')
 train_parser.add_argument('--data-set', type=str, default='TrainingGrids', help='Directory of the training data')
 train_parser.add_argument('--K', type=int, default=10, help='Number of iterations in the loss function')
@@ -82,7 +82,7 @@ if num_lvl == 2:
 if __name__ == "__main__":
     
         
-    path = 'Models/Model-TG-new'#+train_args.data_set
+    path = 'Models/Model-TrainingGrids-neigh'#+train_args.data_set
     
     if not os.path.exists(path):
         os.makedirs(path)
@@ -90,10 +90,10 @@ if __name__ == "__main__":
     list_grids = []
     
     # num_data = sum((len(f) for _, _, f in os.walk('Data/'+train_args.data_set)))-1
-    num_data = 1
+    num_data = 100
     for i in range(num_data):
-        g = torch.load('grid1.pth')
-        # g = torch.load('Data/'+train_args.data_set+"/grid"+str(i)+".pth")
+        # g = torch.load('grid_8k.pth')
+        g = torch.load('Data/'+train_args.data_set+"/grid"+str(i)+".pth")
     
         list_grids.append(g)
     
@@ -105,7 +105,7 @@ if __name__ == "__main__":
     # list_grids = [g]
     print('Finished Uploading Training Data')
     # model = FC_test(g.A.shape[0], g.gmask.nonzero()[0].shape[0], 128, lr = 1e-4)
-    model = HGNN(lvl=2, dim_embed=128, num_layers=6, K=train_args.TAGConv_k, ratio=0.05, lr=1e-4)
+    model = HGNN(lvl=2, dim_embed=128, num_layers=2, K=train_args.TAGConv_k, ratio=0.05, lr=1e-4)
     # model = mloras_net(dim = 128, K = train_args.TAGConv_k, num_res = 8, num_convs = 4, lr = train_args.lr, res = True, tf=False)
     # model.load_state_dict(torch.load("/Users/alitaghibakhshi/PycharmProjects/ML_OSM/OSM_ML/All_Models/Models_for_Grids_pretrain3/model_epoch99.pth"))
     model.to(device)
@@ -142,8 +142,8 @@ if __name__ == "__main__":
                 data = grid.gdata.to(device)
                 data.edge_attr = data.edge_attr.float()
                 output = model.forward(data, grid)
-                sys.exit()
-                u = torch.rand(grid.x.shape[0],100).double().to(device)
+
+                u = torch.rand(grid.x.shape[0],10).double().to(device)
                 u = u/(((u**2).sum(0))**0.5).unsqueeze(0)
                 
                 current_loss = stationary_max(grid, output, u = u, K = train_args.K, precond_type='ML_ORAS')
@@ -169,6 +169,7 @@ if __name__ == "__main__":
         
         if epoch_loss < current_best_loss:
             torch.save(model.state_dict(), path+"/model_epoch_best.pth")
+            torch.save(model.state_dict(), path+"/model_epoch"+str(epoch)+".pth")   
             current_best_loss = epoch_loss
             torch.save(epoch_loss_list, path+"/loss_list.pth")
         epoch_loss = 0
