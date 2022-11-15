@@ -34,7 +34,7 @@ if torch.cuda.is_available():
     device = torch.device('cuda')
 else:
     device = torch.device('cpu')
-    
+
 # indiv_loss = torch.load('Models/Model-gnn/indiv_loss_nolog.pth')
 # for i in range(10):
 #     plt.plot([indiv_loss['epoch '+str(j)]['grid '+str(i)] for j in range(100)], label = 'Grid '+str(i))
@@ -48,9 +48,9 @@ print(device)
 print('********')
 train_parser = argparse.ArgumentParser(description='Settings for training machine learning for ORAS')
 
-train_parser.add_argument('--num-epoch', type=int, default=100, help='Number of training epochs')
-train_parser.add_argument('--mini-batch-size', type=int, default=10, help='Coarsening ratio for aggregation')
-train_parser.add_argument('--lr', type=float, default= 1e-4, help='Learning rate')
+train_parser.add_argument('--num-epoch', type=int, default=200, help='Number of training epochs')
+train_parser.add_argument('--mini-batch-size', type=int, default=1, help='Coarsening ratio for aggregation')
+train_parser.add_argument('--lr', type=float, default= 5e-4, help='Learning rate')
 train_parser.add_argument('--TAGConv-k', type=int, default=2, help='TAGConv # of hops')
 train_parser.add_argument('--dim', type=int, default=128, help='Dimension of TAGConv filter')
 train_parser.add_argument('--data-set', type=str, default='data-800-1k', help='Directory of the training data')
@@ -67,6 +67,7 @@ if NN_debug:
 else:
     from NeuralNet import *
     from hgnn import *
+    from lloyd_gunet import *
 
 if num_lvl == 1:
     
@@ -75,14 +76,13 @@ if num_lvl == 1:
 if num_lvl == 2:
     
     from fgmres_2L import fgmres_2L
-    from utils_2L import *
+    from utils_2L_cpu import *
     
-
 
 if __name__ == "__main__":
     
         
-    path = 'Models/Model-800-1k-no-neigh'#+train_args.data_set
+    path = 'Models/Model-test'#+train_args.data_set
     
     if not os.path.exists(path):
         os.makedirs(path)
@@ -90,11 +90,12 @@ if __name__ == "__main__":
     list_grids = []
     
     num_data = sum((len(f) for _, _, f in os.walk('Data/'+train_args.data_set)))-1
-    num_data = 100
+    num_data = 1
     for i in range(num_data):
-        # g = torch.load('grid1.pth')
-        g = torch.load('Data/'+train_args.data_set+"/grid"+str(i)+".pth")
-    
+        
+        # g = torch.load('Data/'+train_args.data_set+"/grid"+str(i)+".pth")
+
+        g = torch.load('grid1.pth')
         list_grids.append(g)
     
     # gg = torch.load('Data/trainingdata/0.pth')
@@ -105,21 +106,23 @@ if __name__ == "__main__":
     # list_grids = [g]
     print('Finished Uploading Training Data')
     # model = FC_test(g.A.shape[0], g.gmask.nonzero()[0].shape[0], 128, lr = 1e-4)
-    model = HGNN(lvl=2, dim_embed=128, num_layers=2, K= train_args.TAGConv_k, ratio=0.05, lr=train_args.lr)
+    # model = lloyd_gunet(2, 1, 140, K = 2, ratio = 0.5, lr = train_args.lr)
+    model = HGNN(lvl=2, dim_embed=128, num_layers=4, K=train_args.TAGConv_k, ratio=0.2, lr=train_args.lr)
     # model = mloras_net(dim = 128, K = train_args.TAGConv_k, num_res = 8, num_convs = 4, lr = train_args.lr, res = True, tf=False)
-    # model.load_state_dict(torch.load("/Users/alitaghibakhshi/PycharmProjects/ML_OSM/OSM_ML/All_Models/Models_for_Grids_pretrain3/model_epoch99.pth"))
-    model.to(device)
+    # model.load_state_dict(torch.load("/Users/alitaghibakhshi/PycharmProjects/Paper-Multilevel-DD/Code-Multilevel-MLORAS-local/Models/Model-hgnn-lvl2-layer1/model_epoch_best.pth"))
+    # model.to(device)
+    # print('Number of parameters: ',sum(p.numel() for p in model.parameters()))
+
     
     epoch_loss_list = []
 
-    # u = torch.rand(grid.x.shape[0],5000).double()
-    # u = u/(((u**2).sum(0))**0.5).unsqueeze(0)
-    
+
     all_indices = np.arange(num_data)
     model.optimizer.zero_grad()
     
     current_best_loss = 10**12
-    
+    # u = torch.rand(g.x.shape[0],1000).double().to(device)
+
     epoch_loss = 0
     # indiv_loss = {}
     # probs = np.zeros_like(all_indices)
@@ -142,10 +145,17 @@ if __name__ == "__main__":
                 grid = list_grids[i]
                 data = grid.gdata.to(device)
                 data.edge_attr = data.edge_attr.float()
-                output = model.forward(data, grid)
+                output = model.forward(data, grid, train = True)
                 
-                u = torch.rand(grid.x.shape[0],1000).double().to(device)
+                u = torch.rand(grid.x.shape[0],100).double().to(device)
                 u = u/(((u**2).sum(0))**0.5).unsqueeze(0)
+    
+                
+                # M=preconditioner(grid, [output[0].detach(), output[1].detach()], 
+                #                   train = True, precond_type = 'ML_ORAS', u = None)
+                # eprop = build_eprop_op(grid, output[1].detach(), M)
+                # evals, evecs = np.linalg.eig(eprop)
+                # u = torch.real(torch.tensor(evecs)).t()
                 
                 current_loss = stationary_max(grid, output, u = u, K = train_args.K, precond_type='ML_ORAS')
                 

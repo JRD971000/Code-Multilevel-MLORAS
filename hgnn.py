@@ -45,7 +45,7 @@ def make_sparse_torch(A, sparse = True):
                              [i% A.shape[1] for i in range(A.shape[0]*A.shape[1])]])
         dat = A.flatten()
     s = torch.sparse_coo_tensor(idxs, dat, (A.shape[0], A.shape[1]))
-    return s.to_sparse_csr()
+    return s#.to_sparse_csr()
 
 
 class PlainMP(MessagePassing):
@@ -80,7 +80,9 @@ class GUNET(torch.nn.Module):
     def forward(self, data):
         
         return self.gunet(data.x, data.edge_index)
+    
 
+'''
 def K_means_agg(X, A, ratio, grid):
     
     # R, idx = lloyd_aggregation(A, ratio)
@@ -110,7 +112,25 @@ def K_means_agg(X, A, ratio, grid):
     # attr_coarse = A_coarse.to_dense().flatten()[A_coarse.to_dense().flatten().nonzero()].float().to(device)
 
     return X_coarse, coarse_index, idx, fine2coarse, attr_coarse, A_coarse
+  '''  
+  
+def K_means_agg(X, A, ratio):
     
+    R, idx = lloyd_aggregation(A, max(ratio, 2/A.shape[0]))
+    sum_R = scipy.sparse.diags(1/np.array(R.sum(0))[0])
+    R = R @ sum_R
+    idx = torch.tensor(idx)
+    A_coarse = R.transpose() @ A @ R
+    coarse_index = torch.tensor(np.int64(A_coarse.nonzero()))
+    
+    X_coarse = (X.t() @ torch.tensor(R.toarray()).float()).t()
+    
+    
+    fine2coarse = torch.tensor(np.int64(R.nonzero()))
+    attr_coarse = torch.tensor(A_coarse.toarray().flatten()[A_coarse.toarray().flatten().nonzero()]).unsqueeze(1).float()
+    
+    return X_coarse, coarse_index, idx, fine2coarse, attr_coarse, A_coarse
+
 def K_means_agg_torch(X, A, ratio, grid):
     
     # R, idx = lloyd_aggregation(A, ratio)
@@ -241,7 +261,7 @@ class HGNN(torch.nn.Module):
 
         # self.network = torch_geometric.nn.Sequential(self.convs)
         
-        self.optimizer = optim.Adam(self.parameters(), lr = lr)
+        self.optimizer = optim.Adam(self.parameters(), lr = lr, weight_decay = 1e-5)
         # self.optimizer = optim.RMSprop(self.parameters(), lr = lr, alpha=0.99, eps=1e-08, weight_decay=0, momentum=0, centered=False)
         self.device = torch.device('cpu')
         self.to(self.device)
@@ -261,12 +281,17 @@ class HGNN(torch.nn.Module):
         dict_A[0] = A
         x[0], edge_index[0], edge_attr[0] = all_x, all_edge_index, all_edge_attr
         graphs[0] = Data(x[0], edge_index[0], edge_attr[0])
-
+        
+        ratio = 10/grid.aggop[0].shape[1]
+        
         for i in range(1,self.lvl):
             
+            if i ==1:
+                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg_torch(x[i-1], dict_A[i-1], ratio, grid)
+            else:
+                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg(x[i-1], dict_A[i-1], ratio)
+                
 
-            x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg_torch(x[i-1], dict_A[i-1], self.ratio, grid)
-                        
             graphs[i] = Data(x[i], edge_index[i], edge_attr[i]).to(device)
             
         between_edges = {}
@@ -300,7 +325,7 @@ class HGNN(torch.nn.Module):
         return data.x_dict, data.edge_index_dict, data.edge_attr_dict
         
         
-    def forward(self, data, grid):
+    def forward(self, data, grid, train):
         
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
         
@@ -355,7 +380,7 @@ class HGNN(torch.nn.Module):
             for key in x_ff.keys():
 
                 x_ff[key] = normalization(x_ff[key].relu())
-            
+
             
             
         x_coarse = self.linear_out_coarse(x_ff['L1'])
@@ -366,19 +391,28 @@ class HGNN(torch.nn.Module):
         
         
         edge_attr_R = self.edge_model_R(x_coarse[row_coarse], x[col_fine])
-                
+        
         out_R = torch.sparse_coo_tensor([row_coarse, col_fine], edge_attr_R.flatten(),
                                                       (grid.R0.shape[0], grid.R0.shape[1])).double()
         
-        out_R = out_R.to_dense()/out_R.to_dense().sum(0)
 
-        out_R = out_R.to_sparse()
-        '''
-        out_R = self.edge_model_R_dense(x_ff['L0']).t()
-        out_R = out_R/out_R.sum(0)
+        if train:
+            out_R = out_R.to_dense()/out_R.to_dense().sum(0)
 
-        out_R = out_R.double().to_sparse()
-        '''
+            out_R = out_R.to_sparse()
+            
+        else:
+            
+            sum_row_mat = 1/torch.sparse.sum(out_R, dim = 0).coalesce().values()
+            sum_row_mat = torch.sparse_coo_tensor([np.arange(sum_row_mat.shape[0]).tolist(),
+                                                      np.arange(sum_row_mat.shape[0]).tolist()], sum_row_mat, 
+                                                      (sum_row_mat.shape[0], sum_row_mat.shape[0])).double().to_sparse_csr()
+              
+            out_R = sum_row_mat @ out_R.to_sparse_csr().t()
+    
+            out_R = out_R.t().to_sparse_coo()
+
+        
         row = np.array(grid.mask_edges)[:,0].tolist()
         col = np.array(grid.mask_edges)[:,1].tolist()
         
@@ -386,10 +420,19 @@ class HGNN(torch.nn.Module):
 
         # out =  edge_attr  #torch.nn.functional.relu(edge_attr) # torch.nn.functional.leaky_relu(edge_attr)
         sz = grid.gdata.x.shape[0]
-        out = torch.sparse_coo_tensor([row, col], edge_attr.flatten(),(sz, sz)).to_dense().double()
+        out = torch.sparse_coo_tensor([row, col], edge_attr.flatten(),(sz, sz)).double()#.to_dense()
         # print(out.shape)
-        out0 = torch.zeros((out.shape[0], out.shape[0])).double()
+        # out0 = torch.zeros((out.shape[0], out.shape[0])).double()
         # print(out0.shape)
+        
+        if train:
+            
+            out = out.to_dense()
+            
+        else:
+            
+            out = out.to_sparse_csr()
+            
         return out, out_R# + torch.sparse_coo_tensor([grid.R0.nonzero()[0].tolist(), grid.R0.nonzero()[1].tolist()], 
                                                         #  torch.tensor(grid.R0.data).float(),
                                                         # (grid.R0.shape[0], grid.R0.shape[1])).double()
