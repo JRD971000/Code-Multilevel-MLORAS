@@ -1,4 +1,4 @@
-# Learning Interface Conditions in Domain Decomposition Solvers
+# MG-GNN: Multigrid Graph Neural Networks for Learning Multilevel Domain Decomposition Methods
 
 ## Installation
 
@@ -23,7 +23,7 @@ Use `train.py` to train the model:
 ```
 python train.py
 ```
-A full list of arguments can be found by running with `--help`.  A pre-trained model is also included as `trained_model.pth`.
+A full list of arguments can be found by running with `--help`.  A pre-trained model is also included as `Model/model_trained.pth`.
 
 ## Testing
 
