@@ -1,5 +1,7 @@
 # MG-GNN: Multigrid Graph Neural Networks for Learning Multilevel Domain Decomposition Methods
 
+![MGGNN](MGGNN.pdf)
+
 ## Installation
 
 This code requires at least Python 3.8 to run, along with the CPU versions of PyTorch/PyTorch Geometric.  (CUDA versions can be used but are not strictly necessary)
