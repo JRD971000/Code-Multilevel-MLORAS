@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
@@ -19,7 +20,7 @@ from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import subgraph
 from torch_geometric.utils.convert import to_networkx
 from torch_geometric.nn import HeteroConv, GCNConv, SAGEConv, GATConv, Linear,\
-                                 GraphUNet, TAGConv, MessagePassing, NNConv
+                                 GraphUNet, TAGConv, MessagePassing
 import sys
 import scipy
 import torch_geometric
@@ -27,7 +28,6 @@ from torch_geometric.data import HeteroData
 import torch.optim as optim
 from pyamg.aggregation import lloyd_aggregation
 from torch.nn.functional import relu, sigmoid
-from torch_geometric.nn.norm import PairNorm
 from NNs import EdgeModel
 
 if torch.cuda.is_available():
@@ -35,19 +35,6 @@ if torch.cuda.is_available():
 else:
     device = torch.device('cpu')
     
-    
-def make_sparse_torch(A, sparse = True):
-    if sparse:
-        idxs = torch.tensor(np.array(A.nonzero()))
-        dat = torch.tensor(A.data).float()
-    else:
-        idxs = torch.tensor([[i//A.shape[1] for i in range(A.shape[0]*A.shape[1])], 
-                             [i% A.shape[1] for i in range(A.shape[0]*A.shape[1])]])
-        dat = A.flatten()
-    s = torch.sparse_coo_tensor(idxs, dat, (A.shape[0], A.shape[1]))
-    return s#.to_sparse_csr()
-
-
 class PlainMP(MessagePassing):
     def __init__(self, dim_embed, aggr = 'add'):
         super().__init__(aggr=aggr) #  "Max" aggregation.
@@ -81,10 +68,9 @@ class GUNET(torch.nn.Module):
         
         return self.gunet(data.x, data.edge_index)
 
-  
 def K_means_agg(X, A, ratio):
     
-    R, idx = lloyd_aggregation(A, max(ratio, 2/A.shape[0]))
+    R, idx = lloyd_aggregation(A, ratio)
     sum_R = scipy.sparse.diags(1/np.array(R.sum(0))[0])
     R = R @ sum_R
     idx = torch.tensor(idx)
@@ -98,7 +84,7 @@ def K_means_agg(X, A, ratio):
     attr_coarse = torch.tensor(A_coarse.toarray().flatten()[A_coarse.toarray().flatten().nonzero()]).unsqueeze(1).float()
     
     return X_coarse, coarse_index, idx, fine2coarse, attr_coarse, A_coarse
-
+    
 def K_means_agg_torch(X, A, ratio, grid):
     
     # R, idx = lloyd_aggregation(A, ratio)
@@ -128,7 +114,6 @@ def K_means_agg_torch(X, A, ratio, grid):
     
     fine2coarse = torch.tensor(np.int64(neigh_R0.nonzero())).to(device)
     
-    
 
     # fine2coarse = tsR.to_dense().nonzero().to(device)
     # fine2coarse = fine2coarse.reshape(fine2coarse.shape[1], fine2coarse.shape[0])
@@ -139,13 +124,13 @@ def K_means_agg_torch(X, A, ratio, grid):
     return X_coarse, coarse_index, idx, fine2coarse, attr_coarse, A_coarse
 
 
-class MGGNN(torch.nn.Module):
-    def __init__(self, lvl, dim_embed, num_layers, K, ratio, lr, PN=False):
+class lloyd_gunet(torch.nn.Module):
+    def __init__(self, lvl, num_layers, dim_embed, K = 2, ratio = 0.5, lr =1e-3):
         super().__init__()
         
-        self.PN = PN
+        
         self.lvl = lvl
-
+        self.num_layers = num_layers
         # self.droupout = droupout
         self.ratio = ratio
         
@@ -161,60 +146,57 @@ class MGGNN(torch.nn.Module):
                                     Linear(dim_embed, dim_embed), ReLU(),
                                     Linear(dim_embed, dim_embed))
         
-        self.pn = PairNorm()
-        self.convs = torch.nn.ModuleList()
+        self.convs_down = torch.nn.ModuleList()
+        self.down_conv_features = torch.nn.ModuleList()
+        self.convs_up = torch.nn.ModuleList()
+        self.up_conv_features = torch.nn.ModuleList()
+
         self.f2c   = torch.nn.ModuleList()
         self.c2f   = torch.nn.ModuleList()
-        self.name  = 'hgnn_lvl'+str(lvl)+'_numlayer'+str(num_layers)
-        normalizations = []
+        self.coarsest_conv = torch.nn.ModuleList()
 
-        
-        for _ in range(num_layers):
-            
-            dict_fc = {}
-            dict_cf = {}
-            dict_ff = {}
-            
+        self.name  = 'lloyd_gunet_lvl'+str(lvl)
+        normalizations = torch.nn.ModuleList()
+
+        for layer in range(num_layers):
             for i in range(lvl):
-                if i <lvl-1:
+                
+     
+                dict_ff_down = {}
+                dict_ff_up = {}
+                dict_coarsest = {}
+                dict_fc = {}
+                dict_cf = {}
+                
+                if i != lvl-1:
                     dict_fc[('L'+str(i), '->', 'L'+str(i+1))] = PlainMP(dim_embed)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)#TAGConv(dim_embed, dim_embed, K = 2, normalize = False)#
-                    dict_cf[('L'+str(i+1), '->', 'L'+str(i))] = PlainMP(dim_embed)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)#TAGConv(dim_embed, dim_embed, K = 2, normalize = False)#
-                    
-            conv_fc = HeteroConv(dict_fc, aggr='add')
-            conv_cf = HeteroConv(dict_cf, aggr='add')
-            
-            self.f2c.append(conv_fc)            
-            self.c2f.append(conv_cf)
-
-            if self.lvl > 1:
-                
-                for i in range(lvl):
-                    if i == 0 or i == lvl-1:
-         
-                        dict_ff[('L'+str(i), '-', 'L'+str(i))] = TAGConv(2*dim_embed, dim_embed, K = K, normalize = False)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)
-                        # dict_ff[('L'+str(i), '-', 'L'+str(i))] = NNConv(2*dim_embed, dim_embed, 
-                        #                         nn=torch.nn.Sequential(Linear(1, dim_embed), 
-                        #                         torch.nn.ReLU(), Linear(dim_embed, 2*dim_embed*dim_embed)), aggr = 'mean')
-
-                    else:
-                        dict_ff[('L'+str(i), '-', 'L'+str(i))] = TAGConv(3*dim_embed, dim_embed, K = K, normalize = False)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)
-                        # dict_ff[('L'+str(i), '-', 'L'+str(i))] = NNConv(3*dim_embed, dim_embed, 
-                        #                         nn=torch.nn.Sequential(Linear(1, dim_embed), 
-                        #                         torch.nn.ReLU(), Linear(dim_embed, 3*dim_embed*dim_embed)), aggr = 'mean')
-
-            else:   
-                
-                dict_ff[('L'+str(0), '-', 'L'+str(0))] = TAGConv(dim_embed, dim_embed, K = K, normalize = False)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)
-                # dict_ff[('L'+str(0), '-', 'L'+str(0))] = NNConv(dim_embed, dim_embed, 
-                #                         nn=torch.nn.Sequential(Linear(1, dim_embed), 
-                #                         torch.nn.ReLU(), Linear(dim_embed, dim_embed*dim_embed)), aggr = 'mean')
-
-            conv_ff = HeteroConv(dict_ff, aggr='add')
-
-            self.convs.append(conv_ff)
-            
+                    conv_fc = HeteroConv(dict_fc, aggr='add')
+                    self.f2c.append(conv_fc)            
+    
+                if i != 0:
+                    dict_cf[('L'+str(self.lvl-i), '->', 'L'+str(self.lvl-1-i))] = PlainMP(dim_embed)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)#TAGConv(dim_embed, dim_embed, K = 2, normalize = False)#
+                    conv_cf = HeteroConv(dict_cf, aggr='add')
+                    self.c2f.append(conv_cf)
+    
+                if i!=lvl-1:
+                    dict_ff_down[('L'+str(i), '-', 'L'+str(i))] = TAGConv(dim_embed, dim_embed, K = K, normalize = False)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)
+                    conv_ff_down = HeteroConv(dict_ff_down, aggr='add')
+                    self.convs_down.append(conv_ff_down)
+                    # self.down_conv_features.append(Linear(dim_embed, dim_embed))
+                if i != 0:
+                    dict_ff_up[('L'+str(self.lvl-1-i), '-', 'L'+str(self.lvl-1-i))] = TAGConv(dim_embed, dim_embed, K = K, normalize = False)#GATConv(dim_embed, dim_embed, edge_dim = dim_embed)
+                    conv_ff_up = HeteroConv(dict_ff_up, aggr='add')
+                    self.convs_up.append(conv_ff_up)
+                    # self.up_conv_features.append(Linear(dim_embed, dim_embed))
+    
             normalizations.append(torch_geometric.nn.norm.InstanceNorm(dim_embed))
-            
+            dict_coarsest[('L'+str(self.lvl-1), '-', 'L'+str(self.lvl-1))] = TAGConv(dim_embed, dim_embed, K = K, normalize = False)
+            conv_coarsest = HeteroConv(dict_coarsest, aggr='add')
+            self.coarsest_conv.append(conv_coarsest)
+                
+        
+        self.normaliz = normalizations
+        
         self.linear_out  = Linear(dim_embed, dim_embed)
         self.linear_out_coarse  = Linear(dim_embed, dim_embed)
         
@@ -249,18 +231,14 @@ class MGGNN(torch.nn.Module):
         dict_A[0] = A
         x[0], edge_index[0], edge_attr[0] = all_x, all_edge_index, all_edge_attr
         graphs[0] = Data(x[0], edge_index[0], edge_attr[0])
-        
-        ratio = 10/grid.aggop[0].shape[1]
-        
-        for i in range(1,self.lvl):
-            
-            if i ==1:
-                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg_torch(x[i-1], dict_A[i-1], ratio, grid)
-            else:
-                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg(x[i-1], dict_A[i-1], ratio)
-                
 
-            graphs[i] = Data(x[i], edge_index[i], edge_attr[i]).to(device)
+        for i in range(1,self.lvl):
+            if i == 1:
+                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg_torch(x[i-1], dict_A[i-1], self.ratio, grid)
+            else:
+                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg(x[i-1], dict_A[i-1], self.ratio)
+
+            graphs[i] = Data(x[i], edge_index[i], edge_attr[i])
             
         between_edges = {}
 
@@ -268,16 +246,16 @@ class MGGNN(torch.nn.Module):
             
 
             between_edges[str(i)+ ' -> '+str(i+1)] = fine2coarse[i+1]
-            between_edges[str(i+1)+ ' -> '+str(i)] = torch.tensor([fine2coarse[i+1][1].tolist(), fine2coarse[i+1][0].tolist()]).to(device)
+            between_edges[str(i+1)+ ' -> '+str(i)] = torch.tensor([fine2coarse[i+1][1].tolist(), fine2coarse[i+1][0].tolist()])
             
 
         data = HeteroData()
 
         for i in range(self.lvl):
             
-            data['L'+str(i)].x = x[i].to(device)
-            data['L'+str(i),'-','L'+str(i)].edge_index = edge_index[i].to(device)
-            data['L'+str(i),'-','L'+str(i)].edge_attr = edge_attr[i].to(device)
+            data['L'+str(i)].x = x[i]
+            data['L'+str(i),'-','L'+str(i)].edge_index = edge_index[i]
+            data['L'+str(i),'-','L'+str(i)].edge_attr = edge_attr[i]
             
             if i != self.lvl-1:
                 data['L'+str(i),'->','L'+str(i+1)].edge_index = between_edges[str(i)+ ' -> '+str(i+1)]
@@ -289,16 +267,16 @@ class MGGNN(torch.nn.Module):
                 # data['L'+str(i+1),'->','L'+str(i)].edge_attr = self.attr_FC(torch.cat((x[i+1][between_edges[str(i+1)+ ' -> '+str(i)][0]], 
                 #                                                                        x[i][between_edges[str(i+1)+ ' -> '+str(i)][1]]), dim =1))
 
-        
-        return data.x_dict, data.edge_index_dict, data.edge_attr_dict
+        self.perm = idx[1]
+        return data.x_dict, data.edge_index_dict, data.edge_attr_dict#, perm
         
         
     def forward(self, data, grid, train):
         
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
-        
+
         edge_attr = self.pre_edge_main(edge_attr)
-        
+
         x_dict, edge_index_dict,  edge_attr_dict = self.make_graph(x, edge_index, edge_attr, grid)
 
         for key in x_dict.keys():
@@ -310,55 +288,34 @@ class MGGNN(torch.nn.Module):
 
         x_ff = {key: x for key, x in x_dict.items()}
         
-        for conv, conv_fc, conv_cf, normalization in zip(self.convs, self.f2c, self.c2f, self.normaliz):
-
-            if self.lvl > 1:
-                x_fc = conv_fc(x_ff, edge_index_dict)#, edge_attr_dict)
-                for key in x_fc.keys():
-
-                    x_fc[key] = x_fc[key].relu()
-                    #############PiarNorm***************
-                    if self.PN:
-                        x_fc[key] = self.pn(x_fc[key])
-                    ###################################
-                x_cf = conv_cf(x_ff, edge_index_dict)#, edge_attr_dict)
-
-                for key in x_cf.keys():
-
-                    x_cf[key] = x_cf[key].relu()
-                    #############PiarNorm***************
-                    if self.PN:
-                        x_cf[key] = self.pn(x_cf[key])
-                    ###################################
-                x_ff_new = {}
+        for layer in range(self.num_layers):
             
-                for i in range(self.lvl):
+            list_level = [i for i in range(self.lvl-1)]
+            for i in list_level:
+                
+                out = self.convs_down[layer*(self.lvl-1) + i](x_ff, edge_index_dict, edge_attr_dict)
+                # out_ = self.down_conv_features[layer*(self.lvl-1) + i](out['L'+str(i)])
+
+                x_ff['L'+str(i)] = out['L'+str(i)]
+ 
+                out = self.f2c[layer*(self.lvl-1) + i](x_ff, edge_index_dict)#, edge_attr_dict)
+                x_ff['L'+str(i+1)] = out['L'+str(i+1)]
     
-                    if i == 0:
-
-                        x_ff_new['L0'] = torch.cat((x_ff['L0'], x_cf['L0']), dim = 1)
-                    
-                    elif i == self.lvl-1:
-                        
-                        x_ff_new['L'+str(i)] = torch.cat((x_ff['L'+str(i)], x_fc['L'+str(i)]), dim = 1)
-                        
-                    else:
-                        
-                        x_ff_new['L'+str(i)] = torch.cat((x_fc['L'+str(i)], x_ff['L'+str(i)], x_cf['L'+str(i)]), dim = 1)
-    
-                x_ff = x_ff_new
-
-            x_ff = conv(x_ff, edge_index_dict, edge_attr_dict)
-
-            for key in x_ff.keys():
-
-                x_ff[key] = normalization(x_ff[key].relu())
-                #############PiarNorm***************
-                if self.PN:
-                    x_ff[key] = self.pn(x_ff[key])
-                ###################################
+            out = self.coarsest_conv[layer](x_ff, edge_index_dict, edge_attr_dict)
+            x_ff['L'+str(self.lvl-1)] = out['L'+str(self.lvl-1)]
             
+            x_ff = {key: self.normaliz[layer](x) for key, x in x_ff.items()}
             
+            list_level = [self.lvl - 1 - i for i in range(self.lvl-1)]
+            for j, i in enumerate(list_level):
+                
+                out = self.c2f[layer*(self.lvl-1) + j](x_ff, edge_index_dict)#, edge_attr_dict)
+                x_ff['L'+str(i-1)] = out['L'+str(i-1)]
+                out = self.convs_up[layer*(self.lvl-1) + j](x_ff, edge_index_dict, edge_attr_dict)
+                # out_ = self.up_conv_features[layer*(self.lvl-1) + j](out['L'+str(i-1)])
+                x_ff['L'+str(i-1)] = out['L'+str(i-1)]
+   
+                
         x_coarse = self.linear_out_coarse(x_ff['L1'])
         x = self.linear_out(x_ff['L0'])
         
@@ -366,14 +323,12 @@ class MGGNN(torch.nn.Module):
         col_fine = edge_index_dict[('L1', '->', 'L0')][1].tolist()
         
         
-        
-        
         edge_attr_R = self.edge_model_R(x_coarse[row_coarse], x[col_fine])
         
         out_R = torch.sparse_coo_tensor([row_coarse, col_fine], edge_attr_R.flatten(),
                                                       (grid.R0.shape[0], grid.R0.shape[1])).double()
         
-        
+
         if train:
             out_R = out_R.to_dense()/out_R.to_dense().sum(0)
 
@@ -391,15 +346,11 @@ class MGGNN(torch.nn.Module):
             out_R = out_R.t().to_sparse_coo()
 
         
-        # out_R = make_sparse_torch(grid.neigh_R0)
-        
-        
-        
         row = np.array(grid.mask_edges)[:,0].tolist()
         col = np.array(grid.mask_edges)[:,1].tolist()
         
         edge_attr = self.edge_model(x[row], x[col])#, edge_attr.unsqueeze(1)) #+self.edge_model(x[col], x[row], edge_attr_i)
-        # edge_attr = torch.zeros_like(edge_attr)
+
         # out =  edge_attr  #torch.nn.functional.relu(edge_attr) # torch.nn.functional.leaky_relu(edge_attr)
         sz = grid.gdata.x.shape[0]
         out = torch.sparse_coo_tensor([row, col], edge_attr.flatten(),(sz, sz)).double()#.to_dense()
@@ -419,14 +370,39 @@ class MGGNN(torch.nn.Module):
                                                         #  torch.tensor(grid.R0.data).float(),
                                                         # (grid.R0.shape[0], grid.R0.shape[1])).double()
 
-def make_sparse_torch(A, sparse = True):
-    if sparse:
-        A = scipy.sparse.coo_matrix(A)
-        idxs = torch.tensor(np.array(A.nonzero()))
-        dat = torch.tensor(A.data)
-    else:
-        idxs = torch.tensor([[i//A.shape[1] for i in range(A.shape[0]*A.shape[1])], 
-                             [i% A.shape[1] for i in range(A.shape[0]*A.shape[1])]])
-        dat = A.flatten()
-    s = torch.sparse_coo_tensor(idxs, dat, (A.shape[0], A.shape[1]))
-    return s#.to_sparse_csr()
+
+
+
+
+
+
+# x = {'L0' : torch.ones((6,4)), 'L1' : torch.ones((2,4))}
+# edge_index_dict = {('L0','-', 'L0'): torch.tensor([[  0,   0,  0, 2, 1, 4, 5, 3],
+#                                                     [  0,   1,  1, 1, 0, 1, 0, 1]]),
+                   
+#                     ('L0','->', 'L1'): torch.tensor([[  0, 2, 1, 4, 5, 3],
+#                                                     [  0, 0, 1, 0, 0, 1]]),
+                   
+#                     ('L1','->', 'L0'): torch.tensor([[ 0, 0, 1, 0, 1, 1],
+#                                                     [  0, 2, 1, 4, 5, 3]]),
+                   
+#                     ('L1','-', 'L1'): torch.tensor([[0, 1, 1, 1, 0],
+#                                                     [1, 1, 0, 1, 0]])}
+# edge_attr_dict = {
+#                         ('L0','-', 'L0'): torch.rand((8,1)),
+                       
+#                         # ('L0','->', 'L1'): torch.rand((6,1)),
+                       
+#                         # ('L1','->', 'L0'): torch.rand((6,1)),
+                       
+#                         ('L1','-', 'L1'): torch.rand((5,1))
+#     }
+
+# hetero_conv = HeteroConv({
+#     ('L0', '->', 'L1'): PlainMP('sum')
+# }, aggr='sum')
+
+# out = hetero_conv(x, edge_index_dict, edge_attr_dict)
+
+# sys.exit()
+ 

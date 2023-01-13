@@ -5,7 +5,8 @@ Created on Thu Sep 22 00:07:48 2022
 
 @author: alitaghibakhshi
 """
-
+import sys
+sys.path.insert(1, 'utils/')
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -13,7 +14,6 @@ from pathlib import Path
 import os
 import os.path
 from grids import *
-import sys
 import torch as T
 import copy
 import random
