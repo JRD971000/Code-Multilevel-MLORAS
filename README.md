@@ -1,6 +1,6 @@
 # MG-GNN: Multigrid Graph Neural Networks for Learning Multilevel Domain Decomposition Methods
 
-[embed]https://github.com/JRD971000/Code-Multilevel-MLORAS/blob/main/MGGNN.pdf
+![MGGNN](https://user-images.githubusercontent.com/71892896/212237134-c3e34fb6-e92a-4d5a-a1cf-541f2c29340e.png)
 
 ## Installation
 
