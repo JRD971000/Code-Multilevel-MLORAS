@@ -442,6 +442,7 @@ class mesh:
         self.newID = None
         for l in range(levels):
             self.V, self.E = refine2dtri(self.V, self.E)
+            self.E = self.E.astype('int')
         self.nv = self.V.shape[0]
         self.ne = self.E.shape[0]
         self.h = diameter(self.V, self.E)
@@ -614,10 +615,19 @@ def gradgradform(mesh, kappa=None, f=None, degree=1, gamma=None, PDE='Poisson', 
 
     if kappa is None:
         def kappa(_x, _y):
-            # if x>0.5:
-                return 1.
+            return 1
+        # a = np.random.lognormal(mean=-0.0, sigma=1.0)
+        # b = np.random.lognormal(mean=-0.0, sigma=1.0)
+        # a_ = np.random.lognormal(mean=-0.0, sigma=1.0)
+        # b_ = np.random.lognormal(mean=-0.0, sigma=1.0)
+        # def kappa(_x, _y):
+            
+            
+        #     return a * np.sin(a_ * np.pi * _x) + b * np.sin(b_ * np.pi * _y)
+            # if _x>0.5:
+            #     return 1.
             # else:
-            #     return 1000.
+            #     return 100.
             # theta = np.pi/6
             # epsilon = 100
             # c, s = np.cos(theta), np.sin(theta)

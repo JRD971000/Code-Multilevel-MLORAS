@@ -35,7 +35,7 @@ from torch_geometric.data import HeteroData
 import torch.optim as optim
 from pyamg.aggregation import lloyd_aggregation
 from torch.nn.functional import relu, sigmoid
-from NeuralNet import EdgeModel
+from NNs import EdgeModel
 
 if torch.cuda.is_available():
     device = torch.device('cuda')
@@ -75,22 +75,22 @@ class GUNET(torch.nn.Module):
         
         return self.gunet(data.x, data.edge_index)
 
-# def K_means_agg(X, A, ratio):
+def K_means_agg(X, A, ratio):
     
-#     R, idx = lloyd_aggregation(A, ratio)
-#     sum_R = scipy.sparse.diags(1/np.array(R.sum(0))[0])
-#     R = R @ sum_R
-#     idx = torch.tensor(idx)
-#     A_coarse = R.transpose() @ A @ R
-#     coarse_index = torch.tensor(np.int64(A_coarse.nonzero()))
+    R, idx = lloyd_aggregation(A, ratio)
+    sum_R = scipy.sparse.diags(1/np.array(R.sum(0))[0])
+    R = R @ sum_R
+    idx = torch.tensor(idx)
+    A_coarse = R.transpose() @ A @ R
+    coarse_index = torch.tensor(np.int64(A_coarse.nonzero()))
     
-#     X_coarse = (X.t() @ torch.tensor(R.toarray()).float()).t()
+    X_coarse = (X.t() @ torch.tensor(R.toarray()).float()).t()
     
     
-#     fine2coarse = torch.tensor(np.int64(R.nonzero()))
-#     attr_coarse = torch.tensor(A_coarse.toarray().flatten()[A_coarse.toarray().flatten().nonzero()]).unsqueeze(1).float()
+    fine2coarse = torch.tensor(np.int64(R.nonzero()))
+    attr_coarse = torch.tensor(A_coarse.toarray().flatten()[A_coarse.toarray().flatten().nonzero()]).unsqueeze(1).float()
     
-#     return X_coarse, coarse_index, idx, fine2coarse, attr_coarse, A_coarse
+    return X_coarse, coarse_index, idx, fine2coarse, attr_coarse, A_coarse
     
 def K_means_agg_torch(X, A, ratio, grid):
     
@@ -120,7 +120,6 @@ def K_means_agg_torch(X, A, ratio, grid):
     neigh_R0 = grid.neigh_R0.transpose()
     
     fine2coarse = torch.tensor(np.int64(neigh_R0.nonzero())).to(device)
-    
     
 
     # fine2coarse = tsR.to_dense().nonzero().to(device)
@@ -241,9 +240,11 @@ class lloyd_gunet(torch.nn.Module):
         graphs[0] = Data(x[0], edge_index[0], edge_attr[0])
 
         for i in range(1,self.lvl):
-            
-            x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg_torch(x[i-1], dict_A[i-1], self.ratio, grid)
-                        
+            if i == 1:
+                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg_torch(x[i-1], dict_A[i-1], self.ratio, grid)
+            else:
+                x[i], edge_index[i], idx[i], fine2coarse[i], edge_attr[i], dict_A[i] = K_means_agg(x[i-1], dict_A[i-1], self.ratio)
+
             graphs[i] = Data(x[i], edge_index[i], edge_attr[i])
             
         between_edges = {}

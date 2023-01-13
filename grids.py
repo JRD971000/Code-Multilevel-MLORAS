@@ -26,6 +26,7 @@ import fem
 from Unstructured import rand_grid_gen, from_scipy_sparse_matrix, from_networkx, lloyd_aggregation
 import pyamg
 import scipy
+from scipy.spatial import ConvexHull, convex_hull_plot_2d
 import time
 
 mpl.rcParams['figure.dpi'] = 300
@@ -361,9 +362,132 @@ def uns_grid(meshsz):
     
     return old_g
 
+import math
 
+def dotproduct(v1, v2):
+  return sum((a*b) for a, b in zip(v1, v2))
+
+def length(v):
+  return math.sqrt(dotproduct(v, v))
+
+def angle(a1, a2, a3):
+    
+  v1 = a1-a2
+  v2 = a3-a2
+  out = max(dotproduct(v1, v2) / (length(v1) * length(v2)), -1)
+  out = min(out, 1)
+  return math.acos(out)
+
+def find_boundary(A, V):
+    
+    p = 0
+    boundary = []
+    while True:
+        list_angle = []
+        list_neighs = []
+        neighs = A[p].nonzero()[-1].tolist()
+        neighs.remove(p)
+        sz = len(neighs)
+        for i in range(1,sz):
+            for j in range(i):
+                ang = angle(V[neighs[i]], V[p], V[neighs[j]])
+                list_angle.append(ang)
+                list_neighs.append((neighs[i], neighs[j]))
+                
+        idx_max = np.argmax(np.array(list_angle))
+        p1, p2 = list_neighs[idx_max][0], list_neighs[idx_max][1]
+        
+        if p1 not in boundary:
+            p = p1
+            boundary.append(p)
+        elif p2 not in boundary:
+            p = p2
+            boundary.append(p)
+        else:
+            break
+    return boundary
+        
+        
+    
+    
+def refine_grid(grid, levels, ratio = None):
+    
+    msh = fem.mesh(grid.mesh.V, grid.mesh.E)
+    msh.refine(levels)
+    A, _ = fem.gradgradform(msh, PDE = 'Helmholtz')
+    A = scipy.sparse.csr_matrix(A)
+    boundary = find_boundary(A, msh.V)
+    if ratio is None:
+        ratio = 25*((A.shape[0]/600)**0.5)/A.shape[0]
+    new_grid =  Grid_PWA(A, msh, ratio, hops = grid.hops, 
+                          cut=grid.cut, h = 1, nu = 0, BC = grid.BC, boundary= boundary) 
+    
+    return new_grid
+    
+def plot_color(grid, size, w, labeling, fsize, node_color, perm = None,\
+         colorbar = True, vmin=None, vmax = None, cmap=None):
+    
+    G = nx.from_scipy_sparse_matrix(grid.A)
+    G.remove_edges_from(nx.selfloop_edges(G))
+    
+    mymsh = grid.mesh
+    
+    # points = mymsh.N
+    # edges  = mymsh.Edges
+    
+    pos_dict = {}
+    for i in range(mymsh.nv):
+        pos_dict[i] = [mymsh.X[i], mymsh.Y[i]]
+        
+    # G.add_nodes_from(points)
+    # G.add_edges_from(edges)
+    colors = [i for i in range(mymsh.nv)]
+    
+    for i in range(grid.A.shape[0]):
+        colors[i] = node_color[i]
+
+    
+    vmin = -abs(node_color).max() if vmin == None else vmin
+    vmax = abs(node_color).max() if vmax == None else vmax
+    cmap = plt.cm.coolwarm  if cmap == None else cmap
+    colors = np.array(colors)
+    # map colorbar to [vmin, vmax]
+    # a = (vmax-vmin)/(colors.max()-colors.min())
+    # b = vmax-colors.max()*a
+    # colors = a*colors + b
+    
+    draw_networkx(G, pos=pos_dict, with_labels=labeling, node_size=size, \
+                  node_color = colors.tolist(), node_shape = 'o', width = w, font_size = fsize \
+                  , cmap=cmap, vmin=vmin, vmax=vmax)
+        
+    if perm != None:
+        
+        G_coarse = G.subgraph(perm)
+        
+        for i in range(grid.A.shape[0]):
+            colors[i] = node_color[i]
+
+        pos_dict_coarse = {}
+        for i in perm:
+            pos_dict_coarse[i] = [mymsh.X[i], mymsh.Y[i]]
+        
+        colors_coarse = ['k' for i in range(len(perm))]
+        
+        draw_networkx(G_coarse, pos=pos_dict_coarse, with_labels=labeling, node_size=4*size, \
+                      node_color = colors_coarse, node_shape = '*', width = w, font_size = fsize)
+        
+    
+        
+    
+    if colorbar:
+        sm = plt.cm.ScalarMappable(cmap=cmap, norm=plt.Normalize(vmin=vmin, vmax=vmax))
+        sm.set_array([])
+        plt.colorbar(sm)
+        
+    plt.axis('equal')
+        
 class Grid_PWA():
-    def __init__(self, A, mesh, ratio, hops = 1, cut=1, h = 1, nu = 0, BC = 'Neumann'):
+    def __init__(self, A, mesh, ratio, hops = 1, cut=1, h = 1, nu = 0, BC = 'Neumann', boundary = None):
         '''
         Initializes the grid object
         Parameters
@@ -380,8 +504,8 @@ class Grid_PWA():
         self.mesh = mesh
         self.x = self.mesh.V
         
-        if BC == 'Dirichlet':
-            self.apply_bc(1e-8)
+        # if BC == 'Dirichlet':
+        #     self.apply_bc(1e-8, boundary)
             
             
         self.hops = hops
@@ -415,7 +539,7 @@ class Grid_PWA():
             for n in range(self.A.shape[0]):
                 self.dict_nodes_neighbors_hop[n] = set(A_hop[n].nonzero()[-1].tolist())
             
-        self.aggop_gen(self.ratio, self.cut)
+        self.aggop_gen(self.ratio, self.cut, boundary=boundary)
 
         
     @property
@@ -678,25 +802,8 @@ class Grid_PWA():
         plt.axis('equal')    # don't plot singletons
         
     def apply_bc(self, zer):
-            
-        if self.mesh.E.shape[-1] == 3:
-            max_b = self.A[0].nonzero()[-1][2]
-            boundary = [i for i in range(1+max_b)]
-            
-        if self.mesh.E.shape[-1] == 4:
-            
-            boundary = []
-            n_col = int(self.mesh.X.max()/0.04 + 1)
-            n_row = int(len(self.mesh.X)/n_col)
-            
-            boundary.extend([i for i in range(n_col)])
-            boundary.extend([i*n_col for i in range(n_row)])
-            boundary.extend([(i+1)*n_col-1 for i in range(n_row)])
-            boundary.extend([n_col*n_row - 1 - i for i in range(n_col)])
-
-        self.boundary = boundary
-        
-        for n in boundary:
+                    
+        for n in self.boundary:
             nzs = self.A[n].nonzero()[-1].tolist()
             for m in nzs:
                 self.A[n,m] = zer
@@ -746,7 +853,7 @@ class Grid_PWA():
         
         return data
     
-    def aggop_gen(self, ratio, cut, node_agg=None):
+    def aggop_gen(self, ratio, cut, node_agg=None, boundary = None):
         
         if node_agg is None:
             
@@ -868,6 +975,24 @@ class Grid_PWA():
         self.neigh_R0 = neigh_R0
         self.gdata = self.data()
 
+        if boundary is None:
+            if self.mesh.E.shape[-1] == 3:
+                max_b = self.A[0].nonzero()[-1][2]
+                boundary = [i for i in range(1+max_b)]
+                
+            if self.mesh.E.shape[-1] == 4:
+                
+                boundary = []
+                n_col = int(self.mesh.X.max()/0.04 + 1)
+                n_row = int(len(self.mesh.X)/n_col)
+                
+                boundary.extend([i for i in range(n_col)])
+                boundary.extend([i*n_col for i in range(n_row)])
+                boundary.extend([(i+1)*n_col-1 for i in range(n_row)])
+                boundary.extend([n_col*n_row - 1 - i for i in range(n_col)])
+
+        self.boundary = boundary
+        
         if self.BC == 'Dirichlet':
             self.apply_bc(1e-16)
 

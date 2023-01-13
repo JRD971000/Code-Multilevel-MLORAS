@@ -745,7 +745,6 @@ def rand_Amesh_gen1(randomized, n, min_, min_sz, lcmin, lcmax, distmin, distmax,
     # tri = Delaunay(points)
     # plt.triplot(points[:,0], points[:,1], tri.simplices)
     # plt.plot(points[:,0], points[:,1], 'o')
-    
     A,b = fem.gradgradform(mymsh, kappa=None, f=None, degree=1, gamma=gamma , PDE=PDE, kap=kap)
     return A, mymsh
 
