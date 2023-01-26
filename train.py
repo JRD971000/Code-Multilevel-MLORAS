@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Thu Sep 22 00:07:48 2022
 
-@author: alitaghibakhshi
-"""
 import sys
-sys.path.insert(1, 'utils/')
+sys.path.append('utils')
 import matplotlib.pyplot as plt
 import numpy as np
 import torch

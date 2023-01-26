@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Tue Aug 23 22:43:58 2022
 
-@author: alitaghibakhshi
-"""
 
 import networkx as nx
 import torch

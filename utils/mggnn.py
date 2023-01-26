@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Sat Aug 13 15:35:42 2022
 
-@author: alitaghibakhshi
-"""
 import sys
 import numpy as np
 import networkx as nx

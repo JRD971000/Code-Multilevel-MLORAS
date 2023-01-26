@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Aug 24 15:21:11 2022
 
-@author: alitaghibakhshi
-"""
 import sys
-sys.path.insert(1, '/utils')
+sys.path.append('utils')
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
@@ -36,7 +31,7 @@ test_parser.add_argument('--plot', type=bool, default=False, help='Plot the test
 test_parser.add_argument('--model-dir', type=str, default= 'Models/model_trained.pth', help='Model directory')
 test_parser.add_argument('--GNN', type=str, default= 'MG-GNN', help='MG-GNN or Graph-Unet')
 test_parser.add_argument('--data-dir', type=str, default= 'Data/test_grids', help='Test data directory')
-test_parser.add_argument('--data-index', type=int, default= 7, help='Index of the test grid')
+test_parser.add_argument('--data-index', type=int, default= 0, help='Index of the test grid')
 
 test_args = test_parser.parse_args()
 

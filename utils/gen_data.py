@@ -1,10 +1,5 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-Created on Wed Aug 24 13:38:54 2022
 
-@author: alitaghibakhshi
-"""
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -28,12 +23,13 @@ import argparse
 
 data_parser = argparse.ArgumentParser(description='Settings for generating data')
 
-data_parser.add_argument('--directory', type=str, default='Data/new_data', help='Saving directory')
+data_parser.add_argument('--directory', type=str, default='Data/train_grids', help='Saving directory')
 data_parser.add_argument('--num-data', type=int, default=10, help='Number of generated data')
-data_parser.add_argument('--ratio', type=tuple, default=(0.012, 0.03), help='Lower and upper bound for ratio')
-data_parser.add_argument('--size-unstructured', type=tuple, default=(0.2, 0.5), help='Lower and upper bound for  unstructured size')
+data_parser.add_argument('--ratio', type=tuple, default=0.033, help='Coarsening ratio')
 data_parser.add_argument('--hops', type=int, default=1, help='Learnable hops away from boundary')
 data_parser.add_argument('--cut', type=int, default=1, help='RAS delta')
+data_parser.add_argument('--show-fig', type=bool, default=False, help='Plot every generated grid')
+data_parser.add_argument('--mesh-size', type=float, default=0.15, help='Mesh size')
 
 data_args = data_parser.parse_args()
 
@@ -53,24 +49,17 @@ def generate_data(data_args, show_fig = False):
 
         while num_dom<2:
             
-            size = np.random.uniform(low = data_args.size_unstructured[0], high = data_args.size_unstructured[1])
-
-            lcmin = np.random.uniform(0.125, 0.14)
-
-            lcmax = np.random.uniform(0.14, 0.16)
+            
             n = np.random.choice([3,4,5,6,7,8,9,10,20,40])
-            randomized = True if np.random.rand() < 0.4 else True
-            g = rand_grid_gen1(randomized = randomized, n = n, min_ = 0.03, min_sz = 0.6, 
-                          lcmin = lcmin, lcmax = lcmax, distmin = 0.01, distmax = 0.035, PDE = 'Poisson')
+            g = rand_grid_gen1(randomized = True, n = n, min_ = 0.03, min_sz = 0.6, 
+                          lcmin = data_args.mesh_size, lcmax = data_args.mesh_size, distmin = 0.05, distmax = 0.035, PDE = 'Poisson')
 
             
             num_node = g.num_nodes
-            ratio = 0.033 #25*((g.num_nodes/600)**0.5)/g.num_nodes
 
-            grid =  Grid_PWA(g.A, g.mesh, max(2/g.num_nodes, ratio), hops = data_args.hops, 
+            grid =  Grid_PWA(g.A, g.mesh, max(2/g.num_nodes, data_args.ratio), hops = data_args.hops, 
                               cut=data_args.cut, h = 1, nu = 0, BC = 'Dirichlet') 
             num_dom = grid.aggop[0].shape[-1]
-            
             
         print("grid number = ", i, ", number of nodes  ", num_node, ", number of domains = ", num_dom)
         
@@ -83,5 +72,5 @@ def generate_data(data_args, show_fig = False):
             
     torch.save(data_args, path+"/data_config.pth")
             
-generate_data(data_args, show_fig = True)
+generate_data(data_args, show_fig = data_args.show_fig)
 

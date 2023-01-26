@@ -696,7 +696,7 @@ def rand_Amesh_gen1(randomized, n, min_, min_sz, lcmin, lcmax, distmin, distmax,
         hull = ConvexHull(points)
         points = np.array(points)
     
-    msh_sz = 0.1 #0.1*random.random()+0.1
+    msh_sz = lcmin #0.1*random.random()+0.1
     
         
     with pygmsh.geo.Geometry() as geom:
@@ -709,10 +709,10 @@ def rand_Amesh_gen1(randomized, n, min_, min_sz, lcmin, lcmax, distmin, distmax,
         )
         
         p = 0.6 + 0.5*np.random.random((500,500))
-        geom.set_mesh_size_callback(
+        # geom.set_mesh_size_callback(
             #lambda dim, tag, x, y, z: func(x, y, points,min_dist, thresh, min_sz)
-            lambda dim, tag, x, y, z: func1(x, y, p)
-        )
+            # lambda dim, tag, x, y, z: func1(x, y, p)
+        # )
         
         n_edge = len(poly.curves)
         list_edge_idx = np.random.randint(0, n_edge, np.random.randint(1,3,1).item())

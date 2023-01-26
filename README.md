@@ -8,13 +8,26 @@ This code requires at least Python 3.8 to run, along with the CPU versions of Py
 
 A full list of the required Python libraries is included in `requirements.txt`. 
 
+## Generate Data
+
+First, use `utils/gen_data.py` to generate the training and test data with the following command:
+
+```
+python utils/gen_data.py --directory='Data/train_grids'
+python utils/gen_data.py --directory='Data/test_grids'
+
+```
+
+A full list of arguments can be found by running with `python utils/gen_data.py --help`. 
+
+
 ## Training
 
 Use `train.py` to train the model:
 ```
 python train.py
 ```
-A full list of arguments can be found by running with `--help`.  A pre-trained model is also included as `Model/model_trained.pth`.
+A full list of arguments can be found by running with `python train.py --help`.  A pre-trained model is also included as `Model/model_trained.pth`.
 
 ## Testing
 
@@ -22,4 +35,4 @@ Run the evaluation script with
 ```
 python test.py
 ```
-A full list of arguments can be found by running with `--help`.
+A full list of arguments can be found by running with `python test.py --help`.
