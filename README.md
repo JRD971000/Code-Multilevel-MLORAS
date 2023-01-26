@@ -10,7 +10,7 @@ A full list of the required Python libraries is included in `requirements.txt`.
 
 ## Generate Data
 
-First, use `utils/gen_data.py` to generate the training and test data with the following command:
+Use `utils/gen_data.py` to generate the training and test data with the following command:
 
 ```
 python utils/gen_data.py --directory='Data/train_grids'
